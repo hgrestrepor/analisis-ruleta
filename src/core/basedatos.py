@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
+from datetime import datetime, timezone
 from pathlib import Path
 
 from core import ruleta_reglas as R
@@ -70,9 +71,30 @@ def conexion() -> sqlite3.Connection:
     return con
 
 
+ESQUEMA_RESULTADOS = """
+CREATE TABLE IF NOT EXISTS resultados_casino (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    fecha     TEXT NOT NULL,
+    casino    TEXT NOT NULL,
+    base      INTEGER NOT NULL,
+    capturas  INTEGER NOT NULL DEFAULT 0,
+    dudas     INTEGER NOT NULL DEFAULT 0,
+    tiradas   INTEGER NOT NULL DEFAULT 0,
+    apuestas  INTEGER NOT NULL DEFAULT 0,
+    acierto   INTEGER NOT NULL DEFAULT 0,
+    fallo     INTEGER NOT NULL DEFAULT 0,
+    apostado  INTEGER NOT NULL DEFAULT 0,
+    devuelto  INTEGER NOT NULL DEFAULT 0,
+    neto      INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS ix_resultados_casino ON resultados_casino(casino, id);
+"""
+
+
 def inicializar() -> None:
     with _candado, conexion() as con:
         con.executescript(ESQUEMA)
+        con.executescript(ESQUEMA_RESULTADOS)
         _migrar_carpeta(con)
         con.commit()
 
@@ -304,6 +326,84 @@ def secuencia_tiradas(limite: int = 500, carpeta: str | None = None) -> list[dic
             }
         )
     return salida
+
+
+def tiradas_dudosas(limite: int = 500, carpeta: str | None = None) -> list[dict]:
+    """Las celdas que se leyeron pero quedaron fuera del análisis.
+
+    No entran en `secuencia_tiradas` porque su estado es 'duda', pero siguen en
+    la base: así se puede revisar cuál fue el número descartado, en qué imagen
+    estaba y con cuánta confianza, en vez de que desaparezca sin más.
+    """
+    filtro, params = ("AND c.carpeta = ?", (carpeta,)) if carpeta is not None else ("", ())
+    with _candado, conexion() as con:
+        filas = con.execute(
+            f"""SELECT t.posicion, t.numero, t.confianza, t.color,
+                       c.carpeta, c.archivo, c.analizada_en
+                FROM tiradas t JOIN capturas c ON c.id = t.captura_id
+                WHERE t.estado = 'duda' AND c.estado = 'ok' {filtro}
+                ORDER BY c.analizada_en, c.id, t.posicion
+                LIMIT ?""",
+            (*params, max(1, limite)),
+        ).fetchall()
+    return [
+        {
+            "posicion_en_captura": f["posicion"],
+            "numero": f["numero"],
+            "confianza": round(f["confianza"] or 0.0, 3),
+            "color": f["color"],
+            "carpeta": f["carpeta"] or "",
+            "archivo": f["archivo"],
+            "analizada_en": f["analizada_en"],
+        }
+        for f in filas
+    ]
+
+
+def _ahora() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def guardar_resultado(casino: str, sim: dict, capturas: int, dudas: int) -> None:
+    """Guarda una foto del resultado de un casino tras cada análisis.
+
+    Es un historial acumulativo: cada fila es el estado del casino en ese
+    momento, así se puede ver cómo evoluciona la tabla en vez de solo el
+    total de ahora.
+    """
+    with _candado, conexion() as con:
+        con.execute(
+            """INSERT INTO resultados_casino
+               (fecha, casino, base, capturas, dudas, tiradas, apuestas,
+                acierto, fallo, apostado, devuelto, neto)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                _ahora(),
+                casino,
+                int(sim.get("apuesta_base", 0)),
+                capturas,
+                dudas,
+                int(sim.get("tiradas", 0)),
+                int(sim.get("apuestas", 0)),
+                int(sim.get("aciertos", 0)),
+                int(sim.get("fallos", 0)),
+                int(sim.get("total_apostado", 0)),
+                int(sim.get("total_devuelto", 0)),
+                int(sim.get("neto", 0)),
+            ),
+        )
+        con.commit()
+
+
+def historial_resultados(limite: int = 200, casino: str | None = None) -> list[dict]:
+    filtro, params = ("AND casino = ?", (casino,)) if casino is not None else ("", ())
+    with _candado, conexion() as con:
+        filas = con.execute(
+            f"""SELECT * FROM resultados_casino WHERE 1=1 {filtro}
+                ORDER BY id DESC LIMIT ?""",
+            (*params, max(1, limite)),
+        ).fetchall()
+    return [dict(f) for f in filas]
 
 
 def guardar_ajuste(nombre: str, rejilla: dict) -> None:

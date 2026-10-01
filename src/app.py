@@ -170,14 +170,18 @@ def api_resultados(limite: int = 50, casino: str = ""):
 @app.get("/api/numeros")
 def api_numeros(limite: int = 500, casino: str = ""):
     """Lista exacta de los números leídos, para verificar el OCR a mano."""
-    secuencia = BD.secuencia_tiradas(
-        max(1, min(limite, 2000)), _validar_casino(casino) or None
-    )
+    carpeta = _validar_casino(casino) or None
+    secuencia = BD.secuencia_tiradas(max(1, min(limite, 2000)), carpeta)
+    # Las dudosas NO vienen en `secuencia` (allí solo entran las 'ok'), así que
+    # hay que pedirlas aparte. Antes se filtraba la lista buena, que por
+    # definición ya no contenía ninguna, y el contador marcaba siempre 0.
+    dudosas = BD.tiradas_dudosas(max(1, min(limite, 2000)), carpeta)
     return {
         "secuencia": secuencia,
         "numeros": [f["numero"] for f in secuencia],
         "total": len(secuencia),
-        "dudosos": [f for f in secuencia if f["confianza"] < 0.62],
+        "dudosos": dudosas,
+        "total_dudosas": len(dudosas),
         "confianza_media": round(
             sum(f["confianza"] for f in secuencia) / len(secuencia), 3
         )
@@ -248,6 +252,12 @@ def api_escalonado(peticion: PeticionEscalonado):
         "origen": origen,
         **ESC.simular(tiradas, peticion.base, peticion.incluir_cero),
     }
+
+
+@app.get("/api/comparativa")
+def api_comparativa(base: int = 2500, incluir_cero: bool = True):
+    """Compara los 4 casinos con la estrategia de escalada sobre su historial."""
+    return O.comparativa(max(100, min(base, 100000)), incluir_cero)
 
 
 @app.delete("/api/historial")

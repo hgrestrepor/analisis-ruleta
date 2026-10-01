@@ -142,6 +142,16 @@
       <span>celdas dudosas: <strong id="conf-dudas">—</strong></span>
       <span class="ocultar-sm">orden: captura más antigua → más reciente</span>
     </div>
+    <details class="dudas-caja" id="dudas-caja" hidden>
+      <summary>Ver las celdas dudosas (quedan fuera del análisis)</summary>
+      <div class="secuencia-scroll">
+        <table class="tabla tabla-dudas">
+          <thead><tr><th>Imagen</th><th class="num">Pos</th><th class="num">Número leído</th>
+            <th class="num">Confianza</th><th>Motivo</th></tr></thead>
+          <tbody id="tabla-dudas"></tbody>
+        </table>
+      </div>
+    </details>
   </section>
 
   <section class="card" id="simulador">
@@ -245,6 +255,66 @@
       <div class="table-scroll">
         <table id="tabla-esc-ledger">
           <thead><tr><th>#</th><th>Golpe</th><th>Docena</th><th>Se beteó</th><th>Salió</th><th>Resultado</th><th>Neto</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </details>
+  </section>
+
+  <section class="card" id="comparativa">
+    <div class="card-head">
+      <h2>Comparativa de los 4 casinos</h2>
+      <span class="pill" id="pill-comparativa">COP</span>
+    </div>
+    <p class="card-note">
+      Corre la estrategia de escalada sobre <strong>todo</strong> el historial de cada casino,
+      por separado, y los ordena de mejor a peor por dinero neto. Cada vez que terminas un
+      análisis se guarda una foto aquí, así que ves cómo va cambiando el marcador con el tiempo.
+      No es una predicción: es lo que habría dado la estrategia sobre las capturas que llevas.
+    </p>
+
+    <div class="analisis-acciones">
+      <label class="campo-inline">
+        Apuesta por número (2.º golpe)
+        <input type="number" id="cmp-base" value="2500" min="100" step="500">
+      </label>
+      <label class="campo-inline">
+        Triple del 3.º golpe
+        <input type="number" id="cmp-triple" value="7500" min="100" step="500" disabled>
+      </label>
+      <label class="check">
+        <input type="checkbox" id="cmp-cero" checked> Apostar también al 0 (25 números)
+      </label>
+      <button class="btn btn-primary" id="btn-comparativa">Comparar los 4</button>
+    </div>
+
+    <div id="cmp-ganador" class="cmp-ganador" hidden></div>
+
+    <div class="table-scroll">
+      <table class="tabla tabla-comparativa">
+        <thead>
+          <tr>
+            <th class="num">#</th><th>Casino</th>
+            <th class="num">Capturas</th><th class="num">Tiradas</th>
+            <th class="num">Apuestas</th><th class="num">Aciertos</th>
+            <th class="num">% acierto</th>
+            <th class="num">Apostado</th><th class="num">Ganado</th>
+            <th class="num">Neto</th><th class="num">ROI</th>
+          </tr>
+        </thead>
+        <tbody id="tabla-comparativa"></tbody>
+        <tfoot id="pie-comparativa"></tfoot>
+      </table>
+    </div>
+
+    <div class="aviso" id="cmp-aviso" hidden></div>
+
+    <details class="log" id="cmp-historial-caja" hidden>
+      <summary>Ver el historial guardado (una fila por análisis)</summary>
+      <div class="table-scroll">
+        <table class="tabla" id="tabla-cmp-historial">
+          <thead><tr><th>Fecha</th><th>Casino</th><th class="num">Tiradas</th>
+            <th class="num">Apuestas</th><th class="num">Neto</th></tr></thead>
           <tbody></tbody>
         </table>
       </div>
@@ -700,6 +770,25 @@ async function pintarAjustes() {
 /* --------------------------------------- números leídos (verificar OCR) */
 const COLORES = { verde: 'verde', rojo: 'rojo', negro: 'negro' };
 
+function pintarDudas(lista) {
+  const caja = $('#dudas-caja');
+  if (!lista.length) { caja.hidden = true; return; }
+  caja.hidden = false;
+  $('#tabla-dudas').innerHTML = lista.map(f => {
+    const corto = f.archivo.length > 22 ? '…' + f.archivo.slice(-20) : f.archivo;
+    const motivo = f.confianza < 0.55
+      ? 'confianza muy baja'
+      : 'el color de la casilla no coincide con el número';
+    return `<tr>
+      <td title="${f.archivo}">${corto}</td>
+      <td class="num">${f.posicion_en_captura}</td>
+      <td class="num">${f.numero}</td>
+      <td class="num">${(f.confianza * 100).toFixed(0)}%</td>
+      <td class="muted">${motivo}</td>
+    </tr>`;
+  }).join('');
+}
+
 function pintarSecuencia(d) {
   const num = $('#secuencia');
   if (!d.secuencia.length) {
@@ -707,11 +796,14 @@ function pintarSecuencia(d) {
     $('#pill-numeros').textContent = '0 números';
     $('#conf-media').textContent = '—';
     $('#conf-dudas').textContent = '0';
+    $('#dudas-caja').hidden = true;
     return;
   }
   $('#pill-numeros').textContent = `${d.total} números`;
   $('#conf-media').textContent = (d.confianza_media * 100).toFixed(1) + '%';
-  $('#conf-dudas').textContent = d.dudosos.length;
+  $('#conf-dudas').textContent = d.total_dudosas ?? d.dudosos.length;
+
+  pintarDudas(d.dudosos || []);
 
   num.innerHTML = d.secuencia
     .map(f => `<span class="bola ${COLORES[f.color] || ''} ${f.confianza < 0.62 ? 'duda' : ''}"
@@ -877,6 +969,103 @@ async function correrEscalonado() {
   } finally { btn.classList.remove('cargando'); }
 }
 
+/* ------------------------------------------------------- comparativa 4 casinos */
+function pintarComparativa(d) {
+  const pesos = (n) => '$ ' + cop(Math.abs(n));
+  const neto = (n) => (n < 0 ? '−$ ' : '$ ') + cop(Math.abs(n));
+  const roi = (v) => v === null ? '—' : (v > 0 ? '+' : '') + v + '%';
+
+  $('#pill-comparativa').textContent =
+    d.casinos_con_datos + ' de ' + d.filas.length + ' con historial · $'
+    + d.base + ' y $' + d.apuesta_triple + '/número';
+
+  // el casino que más gainó
+  const g = $('#cmp-ganador');
+  if (d.ganador) {
+    g.hidden = false;
+    const malo = d.ganador.neto < 0;
+    g.className = 'cmp-ganador ' + (malo ? 'perdido' : 'ganado');
+    g.innerHTML = `
+      <div class="cmp-ganador-etq">${malo ? 'El menos malo' : 'El más rentable'} de los 4</div>
+      <div class="cmp-ganador-nom">${d.ganador.casino}</div>
+      <div class="cmp-ganador-net">${neto(d.ganador.neto)} COP ·
+        ${roi(d.ganador.roi_pct)} sobre ${pesos(d.ganador.apostado)} apostados</div>
+      <div class="cmp-ganador-sub">${d.ganador.tiradas} tiradas ·
+        ${d.ganador.apuestas} apuestas · ${d.ganador.aciertos} aciertos</div>
+      ${malo ? '<div class="cmp-ganador-av">Los cuatro pierden plata con esta estrategia: ' +
+        'apostar 25 números paga 35:1 y eso, en promedio, da menos de lo que se pone.</div>' : ''}`;
+  } else {
+    g.hidden = false;
+    g.className = 'cmp-ganador';
+    g.innerHTML = '<div class="cmp-ganador-etq">Sin datos todavía</div>' +
+      '<div class="cmp-ganador-sub">Analiza al menos un casino para ver la comparativa.</div>';
+  }
+
+  $('#tabla-comparativa').innerHTML = d.filas.map((f, i) => {
+    const esGanador = d.ganador && f.casino === d.ganador.casino;
+    const fila = f.sin_datos ? ' vacia' : esGanador ? ' ganador' : '';
+    return `<tr class="${fila}">
+      <td class="num">${f.sin_datos ? '—' : i + 1}</td>
+      <td><strong>${f.casino}</strong>${esGanador ? ' 🏆' : ''}</td>
+      <td class="num">${f.capturas}</td>
+      <td class="num">${f.tiradas}</td>
+      <td class="num">${f.apuestas}</td>
+      <td class="num">${f.aciertos}</td>
+      <td class="num">${f.tasa_acerto === null ? '—' : f.tasa_acerto + '%'}</td>
+      <td class="num">${pesos(f.apostado)}</td>
+      <td class="num">${pesos(f.devuelto)}</td>
+      <td class="num ${f.neto > 0 ? 'ganado' : f.neto < 0 ? 'perdido' : ''}"><strong>${neto(f.neto)}</strong></td>
+      <td class="num ${f.roi_pct > 0 ? 'ganado' : f.roi_pct < 0 ? 'perdido' : ''}">${roi(f.roi_pct)}</td>
+    </tr>`;
+  }).join('');
+
+  const t = d.totales;
+  $('#pie-comparativa').innerHTML = `<tr>
+      <td colspan="3"><strong>Los 4 juntos</strong></td>
+      <td class="num">${t.tiradas}</td>
+      <td class="num">${t.apuestas}</td>
+      <td colspan="2"></td>
+      <td class="num">${pesos(t.apostado)}</td>
+      <td class="num">${pesos(t.devuelto)}</td>
+      <td class="num ${t.neto > 0 ? 'ganado' : 'perdido'}"><strong>${neto(t.neto)}</strong></td>
+      <td class="num ${t.roi_pct > 0 ? 'ganado' : 'perdido'}">${roi(t.roi_pct)}</td>
+    </tr>`;
+
+  const av = $('#cmp-aviso');
+  av.hidden = false;
+  av.innerHTML = `Cada casino se simula por separado sobre todas sus capturas. ` +
+    `El 0 cuenta como acierto y rompe la racha. Ojo: la escalada multiplica por 3 ` +
+    `justo cuando la racha va a continuar, así que el tramo de $ ${cop(d.apuesta_triple)} ` +
+    `es el que más pesa en el neto.` +
+    (d.casinos_con_datos < d.filas.length
+      ? ` <strong>Faltan ${d.filas.length - d.casinos_con_datos} casinos por analizar.</strong>`
+      : '');
+
+  // historial guardado
+  const h = d.historial || [];
+  $('#cmp-historial-caja').hidden = h.length === 0;
+  $('#tabla-cmp-historial tbody').innerHTML = h.map(f => `<tr>
+      <td style="color:var(--txt-mute)">${f.fecha.slice(0, 16).replace('T', ' ')}</td>
+      <td>${f.casino}</td>
+      <td class="num">${f.tiradas}</td>
+      <td class="num">${f.apuestas}</td>
+      <td class="num ${f.neto > 0 ? 'ganado' : 'perdido'}">${neto(f.neto)}</td>
+    </tr>`).join('');
+}
+
+async function correrComparativa() {
+  const btn = $('#btn-comparativa');
+  btn.classList.add('cargando');
+  try {
+    const d = await api('/api/comparativa?base=' + (+$('#cmp-base').value || 2500)
+      + '&incluir_cero=' + $('#cmp-cero').checked);
+    pintarComparativa(d);
+  } catch (e) {
+    $('#cmp-aviso').hidden = false;
+    $('#cmp-aviso').textContent = 'Error: ' + e.message;
+  } finally { btn.classList.remove('cargando'); }
+}
+
 /* ------------------------------------------------------------------ init */
 $('#sel-casino').addEventListener('change', () => {
   const c = casino();
@@ -887,6 +1076,13 @@ $('#sel-casino').addEventListener('change', () => {
 $('#btn-analizar').onclick = () => iniciarAnalisis(false);
 $('#btn-simular').onclick = correrSimulacion;
 $('#btn-escalonado').onclick = correrEscalonado;
+$('#btn-comparativa').onclick = correrComparativa;
+$('#cmp-base').addEventListener('change', () => {
+  const v = +$('#cmp-base').value || 2500;
+  $('#cmp-triple').value = v * 3;
+  correrComparativa();
+});
+$('#cmp-cero').addEventListener('change', correrComparativa);
 $('#esc-base').addEventListener('change', () => {
   const v = +$('#esc-base').value || 2500;
   $('#esc-triple').value = v * 3;

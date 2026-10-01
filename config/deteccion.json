@@ -4,6 +4,8 @@
   "max_pasos": 3,
   "escala": 1.0,
   "umbral_confianza": 0.62,
+  "umbral_confianza_alta": 0.70,
+  "umbral_confianza_con_color": 0.55,
   "umbral_tinta": 26,
   "umbral_minimo": 6.0,
   "kernel_por_altura": 0.22,

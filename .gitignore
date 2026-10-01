@@ -18,6 +18,23 @@ data/processed/*
 data/raw/*
 !data/raw/.gitkeep
 
+# ---------------------------------------------------------------------------
+# DATOS PERSONALES: no se suben nunca al repositorio.
+#
+# · imagenes/capturas/  -> son tus capturas de pantalla, con tu dinero y tus
+#                          partidas. Las copias tú, no se versionan.
+# · data/analizador.db   -> historial de tus análisis y de las apuestas que
+#                          habrían dado. Es información financiera tuya.
+#
+# En cada casino solo se versiona el .gitkeep, que es lo que hace que la
+# carpeta exista en el repo para que se pueda clonar y usar de inmediato.
+imagenes/capturas/*
+!imagenes/capturas/*/.gitkeep
+data/analizador.db
+data/analizador.db-journal
+data/analizador.db-wal
+data/analizador.db-shm
+
 # editores y sistema
 .vscode/
 .idea/

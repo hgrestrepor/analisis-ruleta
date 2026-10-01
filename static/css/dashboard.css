@@ -624,6 +624,22 @@ td.vacio { color: var(--txt-mute); font-style: italic; text-align: center; }
 .leyenda-sec strong { color: var(--txt-dim); }
 td.baja { color: var(--gold); font-weight: 600; }
 
+/* ----------------------------------------------- listado de celdas dudosas */
+.dudas-caja { margin-top: 12px; }
+.dudas-caja summary {
+  cursor: pointer; font-size: 0.85rem; color: var(--gold-dim);
+  padding: 6px 0; user-select: none;
+}
+.dudas-caja summary:hover { color: var(--gold); }
+.tabla-dudas { width: 100%; margin-top: 8px; font-size: 0.82rem; }
+.tabla-dudas th {
+  text-align: left; color: var(--txt-mute); font-weight: 600;
+  padding: 5px 8px; border-bottom: 1px solid var(--line);
+}
+.tabla-dudas td { padding: 5px 8px; border-bottom: 1px solid var(--line); }
+.tabla-dudas tr:hover td { background: var(--bg-alt); }
+.tabla-dudas .muted { color: var(--txt-mute); font-size: 0.78rem; }
+
 /* ------------------------------------------------------- simulador COP */
 .campo-inline { display: flex; align-items: center; gap: 9px; color: var(--txt-dim); font-size: 0.85rem; }
 .campo-inline input {
@@ -659,3 +675,39 @@ td.perdido { color: var(--red); }
   border: 1px solid rgba(224, 49, 49, 0.4);
   color: #ffc9c9; font-size: 0.84rem; line-height: 1.5;
 }
+
+/* --------------------------------------------- comparativa de los 4 casinos */
+.cmp-ganador {
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 16px 18px; margin-bottom: 16px;
+  border: 1px solid var(--line); border-left: 3px solid var(--gold);
+  border-radius: 10px; background: var(--bg-alt);
+}
+.cmp-ganador.ganado { border-left-color: var(--green); }
+.cmp-ganador.perdido { border-left-color: var(--red); }
+.cmp-ganador-etq {
+  font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--txt-mute);
+}
+.cmp-ganador-nom {
+  font-size: 1.5rem; font-weight: 700; color: var(--txt);
+  text-transform: capitalize; line-height: 1.15;
+}
+.cmp-ganador-net { font-size: 1.05rem; font-weight: 600; }
+.cmp-ganador.ganado .cmp-ganador-net { color: var(--green); }
+.cmp-ganador.perdido .cmp-ganador-net { color: var(--red); }
+.cmp-ganador-sub { font-size: 0.8rem; color: var(--txt-mute); }
+.cmp-ganador-av {
+  margin-top: 8px; font-size: 0.8rem; color: var(--txt-dim);
+  padding-top: 8px; border-top: 1px solid var(--line);
+}
+.tabla-comparativa td.ganador, .tabla-comparativa tr.ganador td {
+  background: rgba(38, 166, 91, 0.06);
+}
+.tabla-comparativa tr.ganador td:first-child { box-shadow: inset 3px 0 0 var(--green); }
+.tabla-comparativa tr.vacia td { opacity: 0.45; font-style: italic; }
+.tabla-comparativa tfoot td {
+  border-top: 2px solid var(--line);
+  background: var(--bg-alt); font-weight: 600;
+}
+.tabla-comparativa .num { text-align: right; }
