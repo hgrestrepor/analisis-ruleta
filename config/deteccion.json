@@ -1,0 +1,24 @@
+{
+  "modo": "auto",
+  "invertir_orden": false,
+  "max_pasos": 3,
+  "escala": 1.0,
+  "umbral_confianza": 0.62,
+  "umbral_tinta": 26,
+  "umbral_minimo": 6.0,
+  "kernel_por_altura": 0.22,
+  "hueco_por_altura": 0.30,
+  "margen_celda": 0.06,
+  "max_columnas_vacias": 0.15,
+  "residuo_calibracion": 0.45,
+  "roi": null,
+  "rejilla": null,
+  "color": {
+    "s_min": 60,
+    "v_min": 40,
+    "rojo_h": [[0, 16], [164, 179]],
+    "verde_h": [[30, 90]],
+    "negro_v_max": 82,
+    "negro_s_max": 120
+  }
+}

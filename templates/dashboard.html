@@ -1,0 +1,892 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Analizador de Ruleta</title>
+<link rel="stylesheet" href="/static/css/dashboard.css">
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap hero-inner">
+    <div class="brand">
+      <div class="roulette-mark" aria-hidden="true"></div>
+      <div>
+        <h1>Analizador de Ruleta</h1>
+        <p class="subtitle">
+          Análisis de comportamiento por visión artificial ·
+          Ruleta {{ contexto.totales.casillas }} casillas (0–36) ·
+          Ventaja de la casa {{ '%.2f'|format(contexto.totales.ventaja_casa) }}% ·
+          RTP {{ '%.2f'|format(contexto.totales.rtp) }}%
+        </p>
+      </div>
+    </div>
+    <span class="badge" id="estado-badge"><span class="dot"></span> <span id="estado-texto">Listo para analizar</span></span>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <section class="card" id="panel-analisis">
+    <div class="card-head">
+      <h2>Análisis de capturas</h2>
+      <span class="pill" id="pill-capturas">{{ imagenes.capturas }} capturas</span>
+    </div>
+    <p class="card-note">
+      Copia tus capturas en <code>imagenes/capturas/</code> y pulsa Analizar. El motor detecta
+      la retícula automáticamente; si el encaje es dudoso te avisa para que calibres a mano.
+    </p>
+
+    <div class="analisis-acciones">
+      <button id="btn-analizar" class="btn btn-primary">
+        <span class="btn-label">Analizar capturas</span>
+      </button>
+      <button id="btn-reiniciar" class="btn btn-ghost">Borrar historial y reprocesar</button>
+      <label class="check">
+        <input type="checkbox" id="chk-invertir"> Invertir orden (lectura de derecha a izquierda)
+      </label>
+    </div>
+
+    <div class="loader" id="loader" hidden>
+      <div class="loader-bar"><div class="loader-fill" id="loader-fill"></div></div>
+      <div class="loader-meta">
+        <span id="loader-actual">—</span>
+        <span id="loader-cuenta" class="num">0 / 0</span>
+        <span id="loader-pct" class="num">0%</span>
+      </div>
+    </div>
+
+    <details class="log" id="log-caja" hidden>
+      <summary>Registro del análisis</summary>
+      <pre id="log"></pre>
+    </details>
+  </section>
+
+  <div class="kpis" id="kpis">
+    <div class="kpi">
+      <div class="kpi-label">Tiradas registradas</div>
+      <div class="kpi-value" data-kpi="tiradas">—</div>
+      <div class="kpi-foot" data-foot="tiradas">se llena al procesar imágenes</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-label">Imágenes analizadas</div>
+      <div class="kpi-value num" data-kpi="capturas">0</div>
+      <div class="kpi-foot" data-foot="capturas">0 capturas disponibles</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-label">Racha máxima</div>
+      <div class="kpi-value" data-kpi="racha">—</div>
+      <div class="kpi-foot">número repetido consecutivo</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-label">Números distintos</div>
+      <div class="kpi-value" data-kpi="distintos">—</div>
+      <div class="kpi-foot">máximo posible: 37</div>
+    </div>
+  </div>
+
+  <section class="card" id="alternancia">
+    <div class="card-head">
+      <h2>Alternancia de docenas</h2>
+      <span class="pill" id="pill-alternancia">—</span>
+    </div>
+    <p class="card-note" id="alt-nota">
+      Un cambio de alternancia = dos tiradas seguidas de distinta docena. El 0 no tiene
+      docena, así que queda fuera de los pares. Al azar se espera 66.67% de cambios.
+    </p>
+    <div class="grid-2">
+      <div class="table-scroll">
+        <table id="tabla-alt-metricas">
+          <thead><tr><th>Métrica</th><th>Valor</th><th>Esperado</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div class="table-scroll">
+        <table id="tabla-alt-docena">
+          <thead><tr><th>Docena</th><th>Apariciones</th><th>Tiradas entre apariciones</th><th>Máx. ausente</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="barra-alt">
+      <div class="barra-alt-fill" id="barra-alt"></div>
+      <div class="barra-alt-marca" style="left:66.67%" title="Esperado al azar: 66.67%"></div>
+    </div>
+  </section>
+
+  <section class="card" id="repeticion">
+    <div class="card-head">
+      <h2>Números leídos de las imágenes</h2>
+      <span class="pill" id="pill-numeros">—</span>
+    </div>
+    <p class="card-note">
+      Esta es la lista exacta de lo que el módulo de visión reconoció, en orden. Compárala con
+      tus capturas para confirmar que leyó bien. Las celdas de baja confianza se marcan en
+      <span class="chip-alerta">ámbar</span>.
+    </p>
+    <div class="secuencia-scroll">
+      <div class="secuencia" id="secuencia"></div>
+    </div>
+    <div class="leyenda-sec">
+      <span>confianza media: <strong id="conf-media">—</strong></span>
+      <span>celdas dudosas: <strong id="conf-dudas">—</strong></span>
+      <span class="ocultar-sm">orden: captura más antigua → más reciente</span>
+    </div>
+  </section>
+
+  <section class="card" id="simulador">
+    <div class="card-head">
+      <h2>Simulador en pesos colombianos</h2>
+      <span class="pill" id="pill-sim">COP</span>
+    </div>
+    <p class="card-note" id="sim-regla">{{ payload_simulador }}</p>
+
+    <div class="analisis-acciones">
+      <label class="campo-inline">
+        Apuesta por número
+        <input type="number" id="sim-apuesta" value="2500" min="100" step="100">
+      </label>
+      <label class="campo-inline">
+        Apostar a partir de
+        <select id="sim-disparo">
+          <option value="2">2 repeticiones</option>
+          <option value="3" selected>3 repeticiones</option>
+          <option value="4">4 repeticiones</option>
+        </select>
+      </label>
+      <label class="campo-inline">
+        Ignorar rachas de más de
+        <input type="number" id="sim-tope" value="5" min="2" step="1">
+      </label>
+      <label class="check">
+        <input type="checkbox" id="sim-cero" checked> Apostar también al 0 (25 números)
+      </label>
+      <button class="btn btn-primary" id="btn-simular">Simular</button>
+    </div>
+
+    <p class="card-note" style="margin-top:10px">
+      Compara las dos estrategias que pediste de un vistazo. Los escenarios ignoran las rachas
+      más largas que el tope: una racha de 6 o más no cuenta como repetición normal y no se apuesta.
+    </p>
+    <div class="grid-2" id="sim-comparacion" style="margin-top:12px"></div>
+
+    <div class="sim-kpis" id="sim-kpis">
+      <div class="sim-kpi"><div class="sim-label">Apuestas</div><div class="sim-value" data-s="apuestas">—</div></div>
+      <div class="sim-kpi"><div class="sim-label">Aciertos</div><div class="sim-value" data-s="aciertos">—</div></div>
+      <div class="sim-kpi"><div class="sim-label">Fallos</div><div class="sim-value" data-s="fallos">—</div></div>
+      <div class="sim-kpi"><div class="sim-label">Total apostado</div><div class="sim-value" data-s="total_apostado">—</div></div>
+      <div class="sim-kpi"><div class="sim-label">Resultado neto</div><div class="sim-value" data-s="neto">—</div></div>
+      <div class="sim-kpi"><div class="sim-label">ROI</div><div class="sim-value" data-s="roi_pct">—</div></div>
+    </div>
+
+    <div class="aviso" id="sim-aviso" hidden></div>
+
+    <details class="log" id="sim-ledger-caja" hidden>
+      <summary>Ver cada apuesta</summary>
+      <div class="table-scroll">
+        <table id="tabla-ledger">
+          <thead><tr><th>#</th><th>Docena repetida</th><th>Se beteó</th><th>Salió</th><th>Resultado</th><th>Neto</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </details>
+  </section>
+
+  <section class="card" id="escalonado">
+    <div class="card-head">
+      <h2>Estrategia de escalada al tercer golpe</h2>
+      <span class="pill" id="pill-esc">COP</span>
+    </div>
+    <p class="card-note" id="esc-regla">{{ payload_escalonado }}</p>
+
+    <div class="analisis-acciones">
+      <label class="campo-inline">
+        Apuesta por número (2.º golpe)
+        <input type="number" id="esc-base" value="2500" min="100" step="500">
+      </label>
+      <label class="campo-inline">
+        Triple del 3.º golpe
+        <input type="number" id="esc-triple" value="7500" min="100" step="500" disabled>
+      </label>
+      <label class="check">
+        <input type="checkbox" id="esc-cero" checked> Apostar también al 0 (25 números)
+      </label>
+      <button class="btn btn-primary" id="btn-escalonado">Simular escalada</button>
+    </div>
+
+    <div class="sim-kpis" id="esc-kpis">
+      <div class="sim-kpi"><div class="sim-label">Apuestas</div><div class="sim-value" data-e="apuestas">—</div></div>
+      <div class="sim-kpi"><div class="sim-label">Aciertos</div><div class="sim-value" data-e="aciertos">—</div></div>
+      <div class="sim-kpi"><div class="sim-label">Fallos</div><div class="sim-value" data-e="fallos">—</div></div>
+      <div class="sim-kpi"><div class="sim-label">Total apostado</div><div class="sim-value" data-e="total_apostado">—</div></div>
+      <div class="sim-kpi"><div class="sim-label">Ganado en las acertadas</div><div class="sim-value" data-e="ganado">—</div></div>
+      <div class="sim-kpi"><div class="sim-label">Perdido en las falladas</div><div class="sim-value" data-e="perdido">—</div></div>
+      <div class="sim-kpi"><div class="sim-label">Resultado neto</div><div class="sim-value" data-e="neto">—</div></div>
+      <div class="sim-kpi"><div class="sim-label">ROI</div><div class="sim-value" data-e="roi_pct">—</div></div>
+    </div>
+
+    <h3 class="sub" style="margin-top:18px">Ganancia o pérdida por tramo</h3>
+    <div class="grid-2" id="esc-desglose"></div>
+
+    <div class="aviso" id="esc-aviso" hidden></div>
+
+    <details class="log" id="esc-ledger-caja" hidden>
+      <summary>Ver cada apuesta</summary>
+      <div class="table-scroll">
+        <table id="tabla-esc-ledger">
+          <thead><tr><th>#</th><th>Golpe</th><th>Docena</th><th>Se beteó</th><th>Salió</th><th>Resultado</th><th>Neto</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </details>
+  </section>
+
+  <section class="card" id="repeticion-docenas">
+    <div class="card-head">
+      <h2>Cuántas veces se repitió una docena</h2>
+      <span class="pill">Campos: {{ campos_repeticion | join(' · ') }}</span>
+    </div>
+    <p class="card-note">
+      Rachas consecutivas en las que la ruleta repite la misma docena (1–12, 13–24, 25–36).
+      Se cuentan únicamente rachas de 2 o más. Si aparece el <strong>0</strong>, la racha se corta
+      porque el cero no pertenece a ninguna docena.
+    </p>
+    <div class="table-scroll">
+      <table id="tabla-repeticion">
+        <thead>
+          <tr>{% for c in tablas.repeticion_docenas.columnas %}<th>{{ c }}</th>{% endfor %}</tr>
+        </thead>
+        <tbody>
+          {% for fila in tablas.repeticion_docenas.filas %}
+          <tr>
+            {% for celda in fila %}
+              {% if loop.first %}<td>{{ celda }}</td>
+              {% elif celda is none %}<td class="num muted">—</td>
+              {% elif loop.index0 == 3 and celda > 0 %}<td class="num destacado">{{ celda }}</td>
+              {% else %}<td class="num">{{ celda }}</td>{% endif %}
+            {% endfor %}
+          </tr>
+          {% endfor %}
+        </tbody>
+        <tfoot>
+          <tr>
+            {% for celda in tablas.repeticion_docenas.totales %}
+            <td{% if not loop.first %} class="num"{% endif %}>{{ celda if celda is not none else '—' }}</td>
+            {% endfor %}
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+    <div class="card-head" style="margin-top:18px">
+      <h2>Dónde ocurre cada racha</h2>
+      <span class="pill" id="pill-rachas">-</span>
+    </div>
+    <p class="card-note">
+      Lista de cada racha con la posición exacta en la secuencia y los números que la forman,
+      para que puedas compararla contra la imagen. La columna <strong>4+</strong> marca las
+      rachas de cuatro o más, como la de <code>1, 6, 11, 10, 10</code> al inicio de la primera fila.
+    </p>
+    <div class="table-scroll" style="max-height:340px">
+      <table id="tabla-rachas">
+        <thead><tr><th>Posiciones</th><th>Docena</th><th>Largo</th><th>Clase</th><th>Números de la racha</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <h2>Resumen global</h2>
+      <span class="pill" id="pill-resumen">-</span>
+    </div>
+    <p class="card-note">{{ tablas.resumen_global.nota }}</p>
+    <div class="table-scroll">
+      <table id="tabla-resumen">
+        <thead><tr>{% for c in tablas.resumen_global.columnas %}<th>{{ c }}</th>{% endfor %}</tr></thead>
+        <tbody>
+          {% for fila in tablas.resumen_global.filas %}
+          <tr>
+            <td>{{ fila[0] }}</td>
+            {% for celda in fila[1:] %}
+              <td class="num{% if celda is none %} empty-cell{% endif %}">{{ '—' if celda is none else celda }}</td>
+            {% endfor %}
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <h2>Frecuencia por número (0–36)</h2>
+      <span class="pill" id="pill-frec-num">-</span>
+    </div>
+    <p class="card-note">{{ tablas.frecuencia_numeros.nota }}</p>
+    <div class="table-scroll">
+      <table id="tabla-numeros-frec">
+        <thead><tr>{% for c in tablas.frecuencia_numeros.columnas %}<th>{{ c }}</th>{% endfor %}</tr></thead>
+        <tbody>
+          {% for fila in tablas.frecuencia_numeros.filas %}
+          <tr>
+            <td><span class="ball {{ fila[2] }}">{{ fila[0] }}</span></td>
+            <td>{{ fila[1] or '—' }}</td>
+            <td><span class="chip {{ fila[2] }}">{{ fila[2] }}</span></td>
+            <td class="num">{{ fila[3] }}</td>
+            {% for celda in fila[4:] %}<td class="num">{{ celda if celda is not none else '—' }}</td>{% endfor %}
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <div class="grid-2">
+    <section class="card">
+      <div class="card-head">
+        <h2>Frecuencia por color</h2>
+        <span class="pill" id="pill-frec-col">-</span>
+      </div>
+      <p class="card-note">{{ tablas.frecuencia_colores.nota }}</p>
+      <div class="table-scroll">
+        <table id="tabla-colores">
+          <thead><tr>{% for c in tablas.frecuencia_colores.columnas %}<th>{{ c }}</th>{% endfor %}</tr></thead>
+          <tbody>
+            {% for fila in tablas.frecuencia_colores.filas %}
+            <tr>
+              <td><span class="chip {{ 'verde' if fila[0].startswith('verde') else fila[0] }}">{{ fila[0] }}</span></td>
+              {% for celda in fila[1:] %}<td class="num">{{ celda if celda is not none else '—' }}</td>{% endfor %}
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+
+  <section class="card">
+    <div class="card-head">
+      <h2>Frecuencia por docena</h2>
+      <span class="pill" id="pill-frec-doc">-</span>
+    </div>
+    <p class="card-note">{{ tablas.frecuencia_docenas.nota }}</p>
+    <div class="table-scroll">
+      <table id="tabla-docenas">
+        <thead><tr>{% for c in tablas.frecuencia_docenas.columnas %}<th>{{ c }}</th>{% endfor %}</tr></thead>
+        <tbody>
+          {% for fila in tablas.frecuencia_docenas.filas %}
+          <tr>
+            {% for celda in fila %}<td{% if loop.first %} class="num"{% else %} class="num"{% endif %}>{{ celda if celda is not none else '—' }}</td>{% endfor %}
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <h2>Dataset de imágenes</h2>
+      <span class="pill">imagenes/</span>
+    </div>
+    <p class="card-note">
+      Carpeta creada en la raíz del proyecto para entrenar el modelo de visión.
+      Deja aquí las capturas de la ruleta; el módulo de análisis las procesará después.
+    </p>
+    <div class="repo">
+      <div class="repo-item">
+        <span class="count num">{{ imagenes.capturas }}</span>
+        <div class="name">imagenes/capturas/</div>
+        <div class="desc">Capturas completas de pantalla de la mesa</div>
+      </div>
+      <div class="repo-item">
+        <span class="count num">{{ imagenes.recortes }}</span>
+        <div class="name">imagenes/recortes/</div>
+        <div class="desc">Recortes ya normalizados del sector ganador</div>
+      </div>
+      <div class="repo-item">
+        <span class="count num">{{ imagenes.dataset }}</span>
+        <div class="name">imagenes/dataset/</div>
+        <div class="desc">Dataset etiquetado para entrenamiento</div>
+      </div>
+      <div class="repo-item">
+        <span class="count num">{{ imagenes.raiz }}</span>
+        <div class="name">imagenes/ (raíz)</div>
+        <div class="desc">Imágenes sueltas sin subcarpeta</div>
+      </div>
+    </div>
+    <div class="path-box">/home/harold/Escritorio/analizador_ruleta/imagenes</div>
+  </section>
+
+  <section class="card" id="calibracion">
+    <div class="card-head"><h2>Calibración de retícula</h2></div>
+    <p class="card-note">
+      Si el aviso de encaje aparece en el registro, marca la rejilla a mano y guárdala con un
+      nombre. Las capturas del mismo tipo de maquetación la reutilizarán.
+    </p>
+    <div class="grid-2">
+      <div>
+        <label class="campo">Archivo
+          <select id="cal-archivo"></select>
+        </label>
+        <div class="cal-grid">
+          <label class="campo">x<input type="number" step="0.1" id="cal-x"></label>
+          <label class="campo">y<input type="number" step="0.1" id="cal-y"></label>
+          <label class="campo">paso X<input type="number" step="0.1" id="cal-px"></label>
+          <label class="campo">paso Y<input type="number" step="0.1" id="cal-py"></label>
+          <label class="campo">columnas<input type="number" step="1" id="cal-col"></label>
+          <label class="campo">filas<input type="number" step="1" id="cal-filas"></label>
+        </div>
+        <div class="analisis-acciones">
+          <button class="btn btn-primary" id="btn-autodetectar">Autodetectar</button>
+          <button class="btn btn-ghost" id="btn-guardar-cal">Guardar calibración</button>
+        </div>
+        <p class="card-note" id="cal-diagnostico">—</p>
+      </div>
+      <div>
+        <div class="card-head"><h3>Ajustes guardados</h3></div>
+        <div class="table-scroll">
+          <table id="tabla-ajustes">
+            <thead><tr><th>Nombre</th><th>Columnas</th><th>Filas</th><th>Paso</th><th></th></tr></thead>
+            <tbody><tr><td colspan="5" class="vacio">Sin calibraciones guardadas</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer class="wrap">
+  Analizador de Ruleta · v0.2.0 · entorno aislado en <code>.venv</code> ·
+  <a href="/api/reglas" style="color:var(--gold-dim)">/api/reglas</a> ·
+  <a href="/api/esquema" style="color:var(--gold-dim)">/api/esquema</a> ·
+  <a href="/api/estado" style="color:var(--gold-dim)">/api/estado</a> ·
+  <a href="/api/resultados" style="color:var(--gold-dim)">/api/resultados</a> ·
+  <a href="/api/calibracion" style="color:var(--gold-dim)">/api/calibracion</a>
+</footer>
+
+<script>
+const $ = (sel) => document.querySelector(sel);
+const api = async (url, opts) => {
+  const r = await fetch(url, opts);
+  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.statusText);
+  return r.json();
+};
+
+let sonriendo = null;
+
+/* ------------------------------------------------------------------ KPIs */
+function pintarKpis(datos) {
+  const r = datos.resumen;
+  const set = (k, v) => { document.querySelectorAll(`[data-kpi="${k}"]`).forEach(e => e.textContent = v); };
+  set('tiradas', r.total.toLocaleString('es-ES'));
+  set('capturas', r.capturas ?? 0);
+  set('racha', r.racha_max);
+  set('distintos', `${r.numeros_distintos}/37`);
+  document.querySelectorAll('[data-foot="tiradas"]').forEach(e =>
+    e.textContent = `${datos.capturas.capturas_ok} imágenes · ${datos.capturas.dudas} celdas dudosas`);
+  document.querySelectorAll('[data-foot="capturas"]').forEach(e =>
+    e.textContent = `${datos.capturas_disponibles ?? datos.capturas.capturas_ok} archivos en capturas/`);
+}
+
+/* ------------------------------------------------- tablas de estadísticas */
+function celda(valor, clase) {
+  if (valor === null || valor === undefined || valor === '') return '<td class="num muted">—</td>';
+  return `<td class="num ${clase || ''}">${valor}</td>`;
+}
+
+function pintarTabla(selector, tabla, opciones) {
+  const t = $(selector);
+  if (!t || !tabla) return;
+  const ncols = tabla.columnas.length;
+  const cab = t.querySelector('thead tr');
+  if (cab) cab.innerHTML = tabla.columnas.map(c => `<th>${c}</th>`).join('');
+  t.querySelector('tbody').innerHTML = (tabla.filas || []).map(fila => {
+    const celdas = fila.map((v, i) =>
+      i === 0 ? `<td>${v}</td>` : celda(v, opciones && opciones.clase(i, v))
+    );
+    return `<tr class="${opciones && opciones.fila ? opciones.fila(fila) : ''}">${celdas.join('')}</tr>`;
+  }).join('') || `<tr><td colspan="${ncols}" class="vacio">Sin datos</td></tr>`;
+  const pie = t.querySelector('tfoot');
+  if (pie) {
+    pie.hidden = !tabla.totales;
+    if (tabla.totales) {
+      pie.innerHTML = '<tr>' + tabla.totales
+        .map((v, i) => (i === 0 ? `<td>${v}</td>` : celda(v))).join('') + '</tr>';
+    }
+  }
+}
+
+function pintarEsquema(eq, resumen) {
+  // la repetición es la tabla que pediste ver marcada: "4+" se resalta
+  pintarTabla('#tabla-repeticion', eq.repeticion_docenas, {
+    clase: (i, v) => (i === 3 && Number(v) > 0 ? 'destacado' : ''),
+    fila: f => (f.some((v, i) => i > 0 && Number(v) > 0) ? '' : 'fila-vacia'),
+  });
+  pintarTabla('#tabla-docenas', eq.frecuencia_docenas);
+  pintarTabla('#tabla-numeros-frec', eq.frecuencia_numeros);
+  pintarTabla('#tabla-colores', eq.frecuencia_colores);
+  pintarTabla('#tabla-resumen', eq.resumen_global);
+  pintarRachas(resumen && resumen.rachas_detalle);
+}
+
+function pintarRachas(rachas) {
+  const t = $('#tabla-rachas');
+  if (!t) return;
+  const lista = rachas || [];
+  $('#pill-rachas').textContent = `${lista.length} rachas`;
+  t.querySelector('tbody').innerHTML = lista.map(r => {
+    const clase = r.campo === '4+' ? 'destacado' : '';
+    const nums = r.numeros.join(' · ');
+    return `<tr>
+      <td class="num">${r.desde}–${r.hasta}</td>
+      <td>${r.docena}</td>
+      <td class="num">${r.largo}</td>
+      <td class="num ${clase}">${r.campo || '—'}</td>
+      <td class="mono">${nums}</td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="5" class="vacio">Sin rachas</td></tr>';
+}
+
+/* ---------------------------------------------------------- Alternancia */
+function pintarAlternancia(alt) {
+  const filas = [
+    ['Tiradas con docena', alt.tiradas_con_docena, '—'],
+    ['Pares adyacentes comparados', alt.pares_adyacentes, '—'],
+    ['Cambios de docena', alt.cambios, '—'],
+    ['% de alternancia', alt.pct_alternancia + '%', alt.esperado_pct_alternancia + '%'],
+    ['Tiradas por cada cambio', alt.tiradas_por_cambio ?? '—', 1.5],
+    ['Repeticiones iguales seguidas', alt.repeticiones_iguales, '—'],
+    ['Racha media (misma docena)', alt.racha_media, 1.5],
+    ['Racha máxima (misma docena)', alt.racha_max, '—'],
+  ];
+  $('#tabla-alt-metricas tbody').innerHTML = filas
+    .map(([a, b, c]) => `<tr><td>${a}</td><td class="num">${b ?? '—'}</td><td class="num muted">${c}</td></tr>`)
+    .join('');
+  $('#tabla-alt-docena tbody').innerHTML = Object.entries(alt.por_docena)
+    .map(([k, d]) => `<tr><td>${k}</td><td class="num">${d.apariciones}</td><td class="num">${d.tiradas_entre_apariciones}</td><td class="num">${d.max_tiradas_ausente}</td></tr>`)
+    .join('') || '<tr><td colspan="4" class="vacio">Sin datos</td></tr>';
+  const barra = $('#barra-alt');
+  barra.style.width = Math.min(100, alt.pct_alternancia) + '%';
+  barra.classList.toggle('over', alt.pct_alternancia > alt.esperado_pct_alternancia);
+  $('#pill-alternancia').textContent = alt.pct_alternancia + '% de cambios';
+}
+
+/* ------------------------------------------------------------ progreso */
+function pintarEstado(est) {
+  const activo = est.activo;
+  $('#loader').hidden = !activo && est.procesadas === 0;
+  $('#btn-analizar').disabled = activo;
+  $('#btn-reiniciar').disabled = activo;
+  $('#btn-analizar').classList.toggle('cargando', activo);
+  $('#estado-texto').textContent = activo
+    ? `Analizando ${est.actual || ''}`.trim()
+    : (est.procesadas ? `Último análisis: ${est.procesadas} capturas` : 'Listo para analizar');
+  $('#loader-fill').style.width = (est.pct || 0) + '%';
+  $('#loader-actual').textContent = est.actual || (activo ? 'Preparando…' : 'Sin trabajo en curso');
+  $('#loader-cuenta').textContent = `${est.procesadas} / ${est.total}`;
+  $('#loader-pct').textContent = (est.pct || 0) + '%';
+  if (est.log?.length) {
+    $('#log-caja').hidden = false;
+    $('#log').textContent = est.log.join('\n');
+  }
+}
+
+async function refrescar() {
+  try {
+    const datos = await api('/api/esquema');
+    pintarKpis(datos);
+    pintarEsquema(datos.esquema, datos.resumen);
+    pintarAlternancia(datos.alternancia);
+    pintarEstado(datos.progreso);
+    if (sonriendo && !datos.progreso.activo) {
+      clearInterval(sonriendo);
+      sonriendo = null;
+    }
+    await pintarArchivos();
+    await pintarAjustes();
+    const nums = await api('/api/numeros');
+    pintarSecuencia(nums);
+    if (nums.total) await correrSimulacion();
+  } catch (e) { console.error(e); }
+}
+
+function iniciarAnalisis(reiniciar) {
+  $('#btn-analizar').classList.add('cargando');
+  $('#log-caja').hidden = false;
+  $('#log').textContent = 'Iniciando…';
+  api('/api/analizar', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ reiniciar_historial: reiniciar }),
+  })
+    .then(() => { sonriendo = setInterval(refrescar, 600); refrescar(); })
+    .catch(e => { $('#log').textContent = 'Error: ' + e.message; $('#btn-analizar').classList.remove('cargando'); });
+}
+
+/* --------------------------------------------------------- calibración */
+async function pintarArchivos() {
+  const d = await api('/api/imagenes');
+  $('#pill-capturas').textContent = d.capturas_disponibles + ' capturas';
+  const sel = $('#cal-archivo');
+  const actual = sel.value;
+  sel.innerHTML = d.archivos
+    .map(a => `<option value="${a}">${a}</option>`).join('');
+  if (d.archivos.includes(actual)) sel.value = actual;
+}
+
+async function cargarDiagnostico() {
+  const archivo = $('#cal-archivo').value;
+  if (!archivo) return;
+  const d = await api('/api/diagnostico?archivo=' + encodeURIComponent(archivo));
+  const r = d.rejilla || {};
+  $('#cal-x').value = Math.round(r.x ?? 0);
+  $('#cal-y').value = Math.round(r.y ?? 0);
+  $('#cal-px').value = r.paso_x ? r.paso_x.toFixed(1) : '';
+  $('#cal-py').value = r.paso_y ? r.paso_y.toFixed(1) : '';
+  $('#cal-col').value = r.columnas ?? '';
+  $('#cal-filas').value = r.filas ?? '';
+  $('#cal-diagnostico').innerHTML =
+    `${d.n_reconocidas}/${d.n_detectadas} dígitos · confianza ${(d.confianza_promedio*100).toFixed(0)}% · ` +
+    (d.necesita_calibracion
+      ? `<strong style="color:var(--red)">encaje dudoso (residuo ${r.residuo_rel})</strong>`
+      : `<strong style="color:var(--green)">encaje fiable</strong>`);
+}
+
+async function guardarCalibracion() {
+  const nombre = prompt('Nombre de esta calibración (ej. "betfair_movil"):', $('#cal-archivo').value || 'mi_captura');
+  if (!nombre) return;
+  await api('/api/calibracion', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ nombre, rejilla: {
+      x: +$('#cal-x').value, y: +$('#cal-y').value,
+      paso_x: +$('#cal-px').value, paso_y: +$('#cal-py').value,
+      columnas: +$('#cal-col').value, filas: +$('#cal-filas').value,
+    }}),
+  });
+  await pintarAjustes();
+}
+
+async function pintarAjustes() {
+  const d = await api('/api/calibracion');
+  const tb = $('#tabla-ajustes tbody');
+  tb.innerHTML = d.ajustes.length
+    ? d.ajustes.map(a => `<tr><td>${a.nombre}</td><td class="num">${a.columnas}</td><td class="num">${a.filas}</td>
+        <td class="num">${a.paso_x.toFixed(1)}×${a.paso_y.toFixed(1)}</td>
+        <td><button class="btn-mini" data-borrar="${a.nombre}">✕</button></td></tr>`).join('')
+    : '<tr><td colspan="5" class="vacio">Sin calibraciones guardadas</td></tr>';
+  tb.querySelectorAll('[data-borrar]').forEach(b => b.onclick = async () => {
+    await api('/api/calibracion/' + encodeURIComponent(b.dataset.borrar), { method: 'DELETE' });
+    pintarAjustes();
+  });
+}
+
+/* --------------------------------------- números leídos (verificar OCR) */
+const COLORES = { verde: 'verde', rojo: 'rojo', negro: 'negro' };
+
+function pintarSecuencia(d) {
+  const num = $('#secuencia');
+  if (!d.secuencia.length) {
+    num.innerHTML = '<span class="vacio">Sin números todavía.</span>';
+    $('#pill-numeros').textContent = '0 números';
+    $('#conf-media').textContent = '—';
+    $('#conf-dudas').textContent = '0';
+    return;
+  }
+  $('#pill-numeros').textContent = `${d.total} números`;
+  $('#conf-media').textContent = (d.confianza_media * 100).toFixed(1) + '%';
+  $('#conf-dudas').textContent = d.dudosos.length;
+
+  num.innerHTML = d.secuencia
+    .map(f => `<span class="bola ${COLORES[f.color] || ''} ${f.confianza < 0.62 ? 'duda' : ''}"
+      title="pos ${f.pos} · ${f.archivo} · confianza ${(f.confianza*100).toFixed(0)}%">${f.numero}</span>`)
+    .join('');
+}
+
+/* --------------------------------------------------------- simulador COP */
+const cop = (n) => (n === null || n === undefined ? '—' : Number(n).toLocaleString('es-CO'));
+
+function pintarSimulacion(s) {
+  const set = (k, v) => document.querySelectorAll(`[data-s="${k}"]`).forEach(e => e.textContent = v);
+  set('apuestas', s.apuestas);
+  set('aciertos', s.aciertos);
+  set('fallos', s.fallos);
+  set('total_apostado', '$ ' + cop(s.total_apostado));
+  const neto = document.querySelector('[data-s="neto"]');
+  neto.textContent = (s.neto < 0 ? '−$ ' : '$ ') + cop(Math.abs(s.neto));
+  neto.className = 'sim-value ' + (s.neto > 0 ? 'ganado' : s.neto < 0 ? 'perdido' : '');
+  set('roi_pct', s.roi_pct === null ? '—' : s.roi_pct + '%');
+  $('#pill-sim').textContent = s.tiradas + ' tiradas · $' + s.apuesta + '/número';
+
+  $('#sim-regla').textContent = s.regla;
+  const av = $('#sim-aviso');
+  av.hidden = false;
+  av.textContent = s.aviso;
+
+  const movs = s.movimientos.filter(m => !m.sin_resolver);
+  $('#sim-ledger-caja').hidden = movs.length === 0;
+  $('#tabla-ledger tbody').innerHTML = movs.map((m, i) => `<tr>
+      <td class="num">${i + 1}</td>
+      <td>${m.docena_repetida}</td>
+      <td style="color:var(--txt-mute)">todas menos <strong>${m.docena_repetida}</strong>${s.incluye_cero ? ' + el 0' : ''} (${m.cuantos_numeros} núms.)</td>
+      <td class="num"><strong>${m.resultado}</strong></td>
+      <td class="${m.acierto ? 'ganado' : 'perdido'}">${m.acierto ? 'acierto' : 'falló'}</td>
+      <td class="num ${m.neto > 0 ? 'ganado' : 'perdido'}">${m.neto > 0 ? '+' : m.neto < 0 ? '−' : ''}$${cop(Math.abs(m.neto))}</td>
+    </tr>`).join('');
+}
+
+async function correrSimulacion() {
+  const btn = $('#btn-simular');
+  btn.classList.add('cargando');
+  const base = {
+    apuesta: +$('#sim-apuesta').value || 2500,
+    incluir_cero: $('#sim-cero').checked,
+    usar_analizadas: true,
+  };
+  const tope = +$('#sim-tope').value || null;
+  const disparo = +$('#sim-disparo').value || 2;
+  try {
+    const s = await api('/api/simulador', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...base, disparo, racha_max: tope }),
+    });
+    pintarSimulacion(s);
+    // comparación automática de las dos estrategias que pediste
+    const [a, b] = await Promise.all([3, 4].map(d =>
+      api('/api/simulador', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...base, disparo: d, racha_max: tope }),
+      })
+    ));
+    pintarComparacion(a, b, tope);
+  } catch (e) {
+    $('#sim-regla').textContent = 'Error: ' + e.message;
+  } finally { btn.classList.remove('cargando'); }
+}
+
+function pintarComparacion(a, b, tope) {
+  const celda = (s, etiqueta) => {
+    const neto = s.neto;
+    const signo = neto > 0 ? 'ganador' : neto < 0 ? 'perdedor' : '';
+    return `<div class="sim-kpi">
+      <div class="sim-label">${etiqueta}</div>
+      <div class="sim-value ${signo}">${cop(neto)}</div>
+      <div class="sim-label" style="margin-top:6px">
+        ${s.apuestas} apuestas · ${s.aciertos} aciertos · ROI ${s.roi_pct ?? '—'}%
+      </div>
+      <div class="sim-label">${s.rachas_descartadas} rachas descartadas por el tope</div>
+    </div>`;
+  };
+  $('#sim-comparacion').innerHTML =
+    celda(a, 'Apostar tras 3 repeticiones') + celda(b, 'Apostar tras 4 o más repeticiones');
+}
+
+/* -------------------------------------------- escalada al tercer golpe */
+function pintarEscalonado(s) {
+  const set = (k, v) => document.querySelectorAll(`[data-e="${k}"]`).forEach(e => e.textContent = v);
+  const pesos = (n) => '$ ' + cop(Math.abs(n));
+  set('apuestas', s.apuestas);
+  set('aciertos', s.aciertos);
+  set('fallos', s.fallos);
+  set('total_apostado', pesos(s.total_apostado));
+  set('ganado', pesos(s.ganado));
+  set('perdido', pesos(s.perdido));
+  const neto = document.querySelector('[data-e="neto"]');
+  neto.textContent = (s.neto < 0 ? '−$ ' : '$ ') + cop(Math.abs(s.neto));
+  neto.className = 'sim-value ' + (s.neto > 0 ? 'ganado' : s.neto < 0 ? 'perdido' : '');
+  set('roi_pct', s.roi_pct === null ? '—' : s.roi_pct + '%');
+  $('#pill-esc').textContent =
+    s.tiradas + ' tiradas · $' + s.apuesta_base + ' y $' + s.apuesta_triple + '/número';
+
+  $('#esc-regla').textContent = s.regla;
+  const av = $('#esc-aviso');
+  av.hidden = false;
+  av.textContent = s.aviso;
+
+  const celda = (etiqueta, v, extra) => {
+    const signo = v.neto > 0 ? 'ganado' : v.neto < 0 ? 'perdido' : '';
+    return `<div class="sim-kpi">
+      <div class="sim-label">${etiqueta}</div>
+      <div class="sim-value ${signo}">${(v.neto < 0 ? '−$ ' : '$ ') + cop(Math.abs(v.neto))}</div>
+      <div class="sim-label" style="margin-top:6px">
+        ${v.apuestas} apuestas · ${v.aciertos} aciertos · ${v.fallos} fallos
+      </div>
+      <div class="sim-label">apostado $ ${cop(v.total_apostado)}</div>
+      <div class="sim-label" style="margin-top:4px">${extra}</div>
+    </div>`;
+  };
+  $('#esc-desglose').innerHTML =
+    celda('Apuestas de $' + s.apuesta_base, s.desglose.a_2_500,
+          '2.º golpe y cada 2 golpes más') +
+    celda('Apuestas de $' + s.apuesta_triple, s.desglose.a_7_500,
+          '3.º golpe y cada 2 golpes más') +
+    celda('Tras el 2.º golpe', s.impactos.tras_dos_golpes,
+          'Se apuesta a que la 3.ª NO cae') +
+    celda('Tras el 3.º golpe', s.impactos.tras_tres_golpes,
+          'Se apuesta a que la 4.ª NO cae');
+
+  const movs = s.movimientos.filter(m => !m.sin_resolver);
+  $('#esc-ledger-caja').hidden = movs.length === 0;
+  $('#tabla-esc-ledger tbody').innerHTML = movs.map((m, i) => `<tr>
+      <td class="num">${i + 1}</td>
+      <td class="num">${m.racha_al_disparar}º</td>
+      <td>${m.docena_repetida}</td>
+      <td style="color:var(--txt-mute)">$ ${cop(m.apuesta_unitaria)} × ${m.cuantos_numeros} núms.</td>
+      <td class="num"><strong>${m.resultado}</strong></td>
+      <td class="${m.acierto ? 'ganado' : 'perdido'}">${m.acierto ? 'acierto' : 'falló'}</td>
+      <td class="num ${m.neto > 0 ? 'ganado' : 'perdido'}">${m.neto > 0 ? '+' : '−'}$${cop(Math.abs(m.neto))}</td>
+    </tr>`).join('');
+}
+
+async function correrEscalonado() {
+  const btn = $('#btn-escalonado');
+  btn.classList.add('cargando');
+  try {
+    const s = await api('/api/escalonado', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        base: +$('#esc-base').value || 2500,
+        incluir_cero: $('#esc-cero').checked,
+        usar_analizadas: true,
+      }),
+    });
+    pintarEscalonado(s);
+  } catch (e) {
+    $('#esc-regla').textContent = 'Error: ' + e.message;
+  } finally { btn.classList.remove('cargando'); }
+}
+
+/* ------------------------------------------------------------------ init */
+$('#btn-analizar').onclick = () => iniciarAnalisis(false);
+$('#btn-simular').onclick = correrSimulacion;
+$('#btn-escalonado').onclick = correrEscalonado;
+$('#esc-base').addEventListener('change', () => {
+  const v = +$('#esc-base').value || 2500;
+  $('#esc-triple').value = v * 3;
+  correrEscalonado();
+});
+$('#esc-cero').addEventListener('change', correrEscalonado);
+$('#sim-apuesta').addEventListener('change', correrSimulacion);
+$('#sim-cero').addEventListener('change', correrSimulacion);
+$('#sim-disparo').addEventListener('change', correrSimulacion);
+$('#sim-tope').addEventListener('change', correrSimulacion);
+$('#btn-reiniciar').onclick = () => {
+  if (confirm('Se borrará todo el historial de tiradas. ¿Continuar?')) iniciarAnalisis(true);
+};
+$('#cal-archivo').onchange = cargarDiagnostico;
+$('#btn-autodetectar').onclick = cargarDiagnostico;
+$('#btn-guardar-cal').onclick = guardarCalibracion;
+refrescar();
+setInterval(async () => {
+  if (!sonriendo) { const e = await api('/api/estado'); pintarEstado(e); }
+}, 4000);
+</script>
+
+</body>
+</html>

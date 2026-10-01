@@ -1,0 +1,25 @@
+# entorno virtual: se recrea con requirements.txt
+.venv/
+venv/
+env/
+
+# python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# registros y logs
+*.log
+
+# carpetas de trabajo que se vacían solas (se conserva el .gitkeep)
+data/processed/*
+!data/processed/.gitkeep
+data/raw/*
+!data/raw/.gitkeep
+
+# editores y sistema
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
