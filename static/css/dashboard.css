@@ -485,6 +485,18 @@ footer code {
 
 .check { display: flex; align-items: center; gap: 7px; color: var(--txt-dim); font-size: 0.85rem; }
 
+/* selector de casino: alineado con los botones, a la izquierda */
+.campo-casino {
+  display: flex; align-items: center; gap: 8px;
+  color: var(--txt-dim); font-size: 0.85rem; margin: 0;
+}
+.campo-casino select {
+  background: var(--panel); color: var(--txt); border: 1px solid var(--line);
+  border-radius: 8px; padding: 9px 12px; font-size: 0.9rem; cursor: pointer;
+  text-transform: capitalize; min-width: 140px;
+}
+.campo-casino select:focus { outline: 1px solid var(--gold-dim); border-color: var(--gold-dim); }
+
 .pill {
   font-size: 0.75rem; font-weight: 600; letter-spacing: 0.03em;
   color: var(--gold); background: rgba(227, 179, 65, 0.12);

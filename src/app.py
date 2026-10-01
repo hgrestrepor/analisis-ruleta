@@ -30,6 +30,19 @@ templates = Jinja2Templates(directory=BASE_DIR / "templates")
 
 EXTENSIONES_IMAGEN = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tif", ".tiff"}
 SUBCARPETAS_IMAGEN = ["capturas", "recortes", "dataset"]
+CASINOS = O.CARPETAS_CASINO  # betplay, rushbet, wplay, melbet
+
+
+def _validar_casino(nombre: str) -> str:
+    """Devuelve el nombre de casino válido, o cadena vacía (raíz)."""
+    if not nombre:
+        return ""
+    if nombre not in CASINOS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Casino desconocido: {nombre}. Usa uno de {CASINOS}.",
+        )
+    return nombre
 
 
 @app.on_event("startup")
@@ -65,7 +78,8 @@ def dashboard(request: Request):
     # contexto (casillas, edge y RTP) en el encabezado.
     totales = R.resumen()
     # las tablas se rellenan con datos reales: si no, el Jinja deja guiones
-    metricas = O.metricas_completas()
+    casino = request.query_params.get("casino", "")
+    metricas = O.metricas_completas(carpeta=_validar_casino(casino))
     O.rellenar_tabla(metricas["esquema"], metricas["resumen"])
     return templates.TemplateResponse(
         request,
@@ -75,6 +89,8 @@ def dashboard(request: Request):
             "campos_repeticion": E.CAMPOS_REPETICION,
             "agrupaciones": E.AGRUPACIONES,
             "imagenes": _contar_imagenes(),
+            "casinos": CASINOS,
+            "casino_sel": _validar_casino(casino) or CASINOS[0],
             "contexto": {"totales": totales},
             "payload_simulador": SIM.simular([], 2500)["regla"],
         "payload_escalonado": ESC.simular([], 2500)["regla"],
@@ -84,8 +100,8 @@ def dashboard(request: Request):
 
 # ---------------------------------------------------------------------- API
 @app.get("/api/esquema")
-def api_esquema():
-    datos = O.metricas_completas()
+def api_esquema(casino: str = ""):
+    datos = O.metricas_completas(carpeta=_validar_casino(casino))
     O.rellenar_tabla(datos["esquema"], datos["resumen"])
     return datos
 
@@ -96,33 +112,43 @@ def api_reglas():
 
 
 @app.get("/api/imagenes")
-def api_imagenes():
+def api_imagenes(casino: str = ""):
+    casino = _validar_casino(casino)
+    carpeta = O.ruta_carpeta(casino)
     archivos = sorted(
-        p.name for p in O.CARPETA_CAPTURAS.glob("*") if p.suffix.lower() in O.EXTENSIONES
+        p.name for p in carpeta.glob("*") if p.suffix.lower() in O.EXTENSIONES
     )
     return {
         "carpetas": _contar_imagenes(),
+        "casinos": CASINOS,
+        "casino": casino,
         "raiz": str(IMAGENES_DIR),
+        "ruta_carpeta": str(carpeta),
         "capturas_disponibles": len(archivos),
+        "por_casino": {c: O.ANALIZADOR.contar_capturas(c) for c in CASINOS},
         "archivos": archivos,
     }
 
 
 class PeticionAnalisis(BaseModel):
     reiniciar_historial: bool = False
+    casino: str = ""
 
 
 @app.post("/api/analizar")
 def api_analizar(peticion: PeticionAnalisis):
-    if not O.ANALIZADOR.hay_capturas():
+    casino = _validar_casino(peticion.casino)
+    # primero se va lo que ya no está en disco, aunque la carpeta quede vacía
+    O.ANALIZADOR.limpiar_ausentes()
+    if not O.ANALIZADOR.hay_capturas(casino):
         raise HTTPException(
             status_code=400,
             detail=(
-                "No hay capturas. Copia tus imágenes en "
-                f"{O.CARPETA_CAPTURAS} y vuelve a intentarlo."
+                f"No hay imágenes en '{casino or 'capturas'}'. Copia tus capturas en "
+                f"{O.ruta_carpeta(casino)} y vuelve a intentarlo."
             ),
         )
-    if not O.ANALIZADOR.iniciar(peticion.reiniciar_historial):
+    if not O.ANALIZADOR.iniciar(peticion.reiniciar_historial, casino):
         raise HTTPException(status_code=409, detail="Ya hay un análisis en curso.")
     return {"iniciado": True, "estado": O.ANALIZADOR.snapshot()}
 
@@ -133,17 +159,20 @@ def api_estado():
 
 
 @app.get("/api/resultados")
-def api_resultados(limite: int = 50):
+def api_resultados(limite: int = 50, casino: str = ""):
+    filtro = _validar_casino(casino) or None
     return {
-        "ultimas_capturas": BD.ultimas_capturas(max(1, min(limite, 200))),
-        "resumen": BD.resumen_capturas(),
+        "ultimas_capturas": BD.ultimas_capturas(max(1, min(limite, 200)), filtro),
+        "resumen": BD.resumen_capturas(filtro),
     }
 
 
 @app.get("/api/numeros")
-def api_numeros(limite: int = 500):
+def api_numeros(limite: int = 500, casino: str = ""):
     """Lista exacta de los números leídos, para verificar el OCR a mano."""
-    secuencia = BD.secuencia_tiradas(max(1, min(limite, 2000)))
+    secuencia = BD.secuencia_tiradas(
+        max(1, min(limite, 2000)), _validar_casino(casino) or None
+    )
     return {
         "secuencia": secuencia,
         "numeros": [f["numero"] for f in secuencia],
@@ -164,12 +193,13 @@ class PeticionSimulacion(BaseModel):
     tiradas: list[int] | None = None
     disparo: int = 2
     racha_max: int | None = None
+    casino: str = ""
 
 
 @app.post("/api/simulador")
 def api_simulador(peticion: PeticionSimulacion):
     if peticion.usar_analizadas or not peticion.tiradas:
-        tiradas = BD.todas_las_tiradas()
+        tiradas = BD.todas_las_tiradas(_validar_casino(peticion.casino) or None)
         origen = "tiradas leídas de las imágenes"
     else:
         tiradas = [t for t in peticion.tiradas if isinstance(t, int) and 0 <= t <= 36]
@@ -197,13 +227,14 @@ class PeticionEscalonado(BaseModel):
     incluir_cero: bool = True
     usar_analizadas: bool = True
     tiradas: list[int] | None = None
+    casino: str = ""
 
 
 @app.post("/api/escalonado")
 def api_escalonado(peticion: PeticionEscalonado):
     """Estrategia de escalada: 2.500 al segundo golpe, 7.500 al tercero."""
     if peticion.usar_analizadas or not peticion.tiradas:
-        tiradas = BD.todas_las_tiradas()
+        tiradas = BD.todas_las_tiradas(_validar_casino(peticion.casino) or None)
         origen = "tiradas leídas de las imágenes"
     else:
         tiradas = [t for t in peticion.tiradas if isinstance(t, int) and 0 <= t <= 36]
@@ -220,9 +251,10 @@ def api_escalonado(peticion: PeticionEscalonado):
 
 
 @app.delete("/api/historial")
-def api_limpiar_historial():
-    BD.limpiar()
-    return {"historial": "borrado"}
+def api_limpiar_historial(casino: str = ""):
+    nombre = _validar_casino(casino)
+    BD.limpiar(nombre or None)
+    return {"historial": "borrado", "casino": nombre}
 
 
 # ------------------------------------------------------------- calibración
@@ -260,8 +292,8 @@ def api_calibracion_borrar(nombre: str):
 
 # ------------------------------------------------------ diagnóstico puntual
 @app.get("/api/diagnostico")
-def api_diagnostico(archivo: str):
-    ruta = O.CARPETA_CAPTURAS / Path(archivo).name
+def api_diagnostico(archivo: str, casino: str = ""):
+    ruta = O.ruta_carpeta(_validar_casino(casino)) / Path(archivo).name
     if not ruta.exists() or ruta.suffix.lower() not in O.EXTENSIONES:
         raise HTTPException(status_code=404, detail="Captura no encontrada.")
     cfg = vision.cargar_config()

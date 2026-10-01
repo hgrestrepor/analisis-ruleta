@@ -34,11 +34,20 @@
       <span class="pill" id="pill-capturas">{{ imagenes.capturas }} capturas</span>
     </div>
     <p class="card-note">
-      Copia tus capturas en <code>imagenes/capturas/</code> y pulsa Analizar. El motor detecta
-      la retícula automáticamente; si el encaje es dudoso te avisa para que calibres a mano.
+      Elige el casino, copia tus capturas en su carpeta
+      (<code id="nota-carpeta">imagenes/capturas/betplay/</code>) y pulsa Analizar. El motor
+      detecta la retícula automáticamente; si el encaje es dudoso te avisa para que calibres a mano.
     </p>
 
     <div class="analisis-acciones">
+      <label class="campo campo-casino">
+        <span>Casino</span>
+        <select id="sel-casino">
+          {% for c in casinos %}
+          <option value="{{ c }}" {% if c == casino_sel %}selected{% endif %}>{{ c }}</option>
+          {% endfor %}
+        </select>
+      </label>
       <button id="btn-analizar" class="btn btn-primary">
         <span class="btn-label">Analizar capturas</span>
       </button>
@@ -594,9 +603,12 @@ function pintarEstado(est) {
   }
 }
 
+function casino() { return $('#sel-casino').value || 'betplay'; }
+function qs(v) { return encodeURIComponent(v); }
+
 async function refrescar() {
   try {
-    const datos = await api('/api/esquema');
+    const datos = await api('/api/esquema?casino=' + qs(casino()));
     pintarKpis(datos);
     pintarEsquema(datos.esquema, datos.resumen);
     pintarAlternancia(datos.alternancia);
@@ -607,7 +619,7 @@ async function refrescar() {
     }
     await pintarArchivos();
     await pintarAjustes();
-    const nums = await api('/api/numeros');
+    const nums = await api('/api/numeros?casino=' + qs(casino()));
     pintarSecuencia(nums);
     if (nums.total) await correrSimulacion();
   } catch (e) { console.error(e); }
@@ -620,7 +632,7 @@ function iniciarAnalisis(reiniciar) {
   api('/api/analizar', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ reiniciar_historial: reiniciar }),
+    body: JSON.stringify({ reiniciar_historial: reiniciar, casino: casino() }),
   })
     .then(() => { sonriendo = setInterval(refrescar, 600); refrescar(); })
     .catch(e => { $('#log').textContent = 'Error: ' + e.message; $('#btn-analizar').classList.remove('cargando'); });
@@ -628,7 +640,7 @@ function iniciarAnalisis(reiniciar) {
 
 /* --------------------------------------------------------- calibración */
 async function pintarArchivos() {
-  const d = await api('/api/imagenes');
+  const d = await api('/api/imagenes?casino=' + qs(casino()));
   $('#pill-capturas').textContent = d.capturas_disponibles + ' capturas';
   const sel = $('#cal-archivo');
   const actual = sel.value;
@@ -640,7 +652,8 @@ async function pintarArchivos() {
 async function cargarDiagnostico() {
   const archivo = $('#cal-archivo').value;
   if (!archivo) return;
-  const d = await api('/api/diagnostico?archivo=' + encodeURIComponent(archivo));
+  const d = await api('/api/diagnostico?archivo=' + encodeURIComponent(archivo)
+                       + '&casino=' + qs(casino()));
   const r = d.rejilla || {};
   $('#cal-x').value = Math.round(r.x ?? 0);
   $('#cal-y').value = Math.round(r.y ?? 0);
@@ -745,6 +758,7 @@ async function correrSimulacion() {
     apuesta: +$('#sim-apuesta').value || 2500,
     incluir_cero: $('#sim-cero').checked,
     usar_analizadas: true,
+    casino: casino(),
   };
   const tope = +$('#sim-tope').value || null;
   const disparo = +$('#sim-disparo').value || 2;
@@ -854,6 +868,7 @@ async function correrEscalonado() {
         base: +$('#esc-base').value || 2500,
         incluir_cero: $('#esc-cero').checked,
         usar_analizadas: true,
+        casino: casino(),
       }),
     });
     pintarEscalonado(s);
@@ -863,6 +878,12 @@ async function correrEscalonado() {
 }
 
 /* ------------------------------------------------------------------ init */
+$('#sel-casino').addEventListener('change', () => {
+  const c = casino();
+  $('#nota-carpeta').textContent = 'imagenes/capturas/' + c + '/';
+  history.replaceState(null, '', '?casino=' + qs(c));
+  refrescar();
+});
 $('#btn-analizar').onclick = () => iniciarAnalisis(false);
 $('#btn-simular').onclick = correrSimulacion;
 $('#btn-escalonado').onclick = correrEscalonado;

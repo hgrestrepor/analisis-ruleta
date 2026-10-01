@@ -21,16 +21,27 @@ RAIZ = Path(__file__).resolve().parents[2]
 CARPETA_CAPTURAS = RAIZ / "imagenes" / "capturas"
 EXTENSIONES = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
 
+# Una subcarpeta por casino. La raíz de `capturas` guarda las imágenes viejas.
+CARPETAS_CASINO = ["betplay", "rushbet", "wplay", "melbet"]
+
 
 def _ahora() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def ruta_carpeta(nombre: str) -> Path:
+    """Carpeta de un casino. `nombre` vacío significa la raíz de capturas."""
+    if not nombre:
+        return CARPETA_CAPTURAS
+    return CARPETA_CAPTURAS / nombre
 
 
 class Analizador:
     """Mantiene un único análisis en curso y su progreso."""
 
     def __init__(self) -> None:
-        self._candado = threading.Lock()
+        # RLock, no Lock: iniciar() escribe en el log desde dentro del candado
+        self._candado = threading.RLock()
         self._hilo: threading.Thread | None = None
         self.estado: dict = {
             "activo": False,
@@ -62,31 +73,43 @@ class Analizador:
             del self.estado["log"][:-200]
 
     # ---------------------------------------------------------------- inicio
-    def hay_capturas(self) -> bool:
+    def hay_capturas(self, carpeta: str = "") -> bool:
         return any(
-            p.suffix.lower() in EXTENSIONES for p in CARPETA_CAPTURAS.glob("*")
+            p.suffix.lower() in EXTENSIONES for p in ruta_carpeta(carpeta).glob("*")
         )
 
-    def contar_capturas(self) -> int:
+    def contar_capturas(self, carpeta: str = "") -> int:
         return sum(
-            1 for p in CARPETA_CAPTURAS.glob("*") if p.suffix.lower() in EXTENSIONES
+            1 for p in ruta_carpeta(carpeta).glob("*") if p.suffix.lower() in EXTENSIONES
         )
 
-    def iniciar(self, reiniciar_historial: bool = False) -> bool:
+    def limpiar_ausentes(self) -> int:
+        """Quita del historial las capturas cuyo archivo ya no está en la carpeta.
+
+        Se llama antes de comprobar si hay imágenes, para que al borrar todo
+        el dashboard no se quede con los datos de las capturas anteriores.
+        """
+        return BD.podar_capturas_inexistentes(CARPETA_CAPTURAS)
+
+    def iniciar(self, reiniciar_historial: bool = False, carpeta: str = "") -> bool:
+        if carpeta and carpeta not in CARPETAS_CASINO:
+            return False
         with self._candado:
             if self._hilo and self._hilo.is_alive():
                 return False
             # lo que ya no está en disco no debe seguir contando como captura
-            podadas = BD.podar_capturas_inexistentes(CARPETA_CAPTURAS)
+            podadas = self.limpiar_ausentes()
             if podadas:
                 self._log(f"Limpieza: {podadas} captura(s) borrada(s) del disco, "
                           "se quitaron del contador")
+            etiqueta = carpeta or "capturas"
             self.estado = {
                 "activo": True,
-                "total": self.contar_capturas(),
+                "carpeta": carpeta,
+                "total": self.contar_capturas(carpeta),
                 "procesadas": 0,
                 "actual": None,
-                "log": [],
+                "log": [f"Analizando la carpeta: {etiqueta}"],
                 "iniciado_en": _ahora(),
                 "terminado_en": None,
                 "errores": 0,
@@ -94,7 +117,7 @@ class Analizador:
             }
             hilo = threading.Thread(
                 target=self._trabajar,
-                args=(reiniciar_historial,),
+                args=(reiniciar_historial, carpeta),
                 daemon=True,
             )
             self._hilo = hilo
@@ -102,15 +125,18 @@ class Analizador:
         return True
 
     # ------------------------------------------------------------- worker
-    def _trabajar(self, reiniciar: bool) -> None:
+    def _trabajar(self, reiniciar: bool, carpeta: str = "") -> None:
         try:
             if reiniciar:
-                BD.limpiar()
+                # solo se borra el historial del casino elegido, no el de los demás
+                BD.limpiar(carpeta)
                 self._log("Historial anterior borrado.")
 
             cfg = vision.cargar_config()
             rutas = sorted(
-                p for p in CARPETA_CAPTURAS.glob("*") if p.suffix.lower() in EXTENSIONES
+                p
+                for p in ruta_carpeta(carpeta).glob("*")
+                if p.suffix.lower() in EXTENSIONES
             )
             inicio = time.time()
             nuevas = 0
@@ -118,12 +144,12 @@ class Analizador:
             for ruta in rutas:
                 with self._candado:
                     self.estado["actual"] = ruta.name
-                self._analizar_una(ruta, cfg)
+                self._analizar_una(ruta, cfg, carpeta)
                 with self._candado:
                     self.estado["procesadas"] += 1
                 time.sleep(0.0)  # cede el hilo para que la UI refresque
 
-            nuevas = BD.resumen_capturas()["tiradas"]
+            nuevas = BD.resumen_capturas(carpeta or None)["tiradas"]
             with self._candado:
                 self.estado["tiradas_nuevas"] = nuevas
                 self.estado["actual"] = None
@@ -140,9 +166,9 @@ class Analizador:
                 self.estado["activo"] = False
                 self.estado["terminado_en"] = _ahora()
 
-    def _analizar_una(self, ruta: Path, cfg: dict) -> None:
+    def _analizar_una(self, ruta: Path, cfg: dict, carpeta: str = "") -> None:
         # reprocesar una captura reemplaza sus filas anteriores en vez de duplicarlas
-        BD.borrar_por_archivo(ruta.name)
+        BD.borrar_por_archivo(ruta.name, carpeta)
         try:
             res = vision.analizar_imagen(ruta, cfg)
         except Exception as exc:
@@ -162,6 +188,7 @@ class Analizador:
                 rejilla=None,
                 estado="error",
                 error=str(exc),
+                carpeta=carpeta,
             )
             return
 
@@ -183,6 +210,7 @@ class Analizador:
             ruta=str(ruta),
             analizada_en=_ahora(),
             modo=res.modo,
+            carpeta=carpeta,
             n_detectadas=res.n_detectadas,
             n_reconocidas=res.n_reconocidas,
             n_dudas=res.n_dudas,
@@ -220,10 +248,14 @@ ANALIZADOR = Analizador()
 
 
 # ------------------------------------------------------------------ métricas
-def metricas_completas(limite_capturas: int = 50) -> dict:
-    """Todo lo que el dashboard necesita, en una sola respuesta."""
-    tiradas = BD.todas_las_tiradas()
-    historial = BD.resumen_capturas()
+def metricas_completas(limite_capturas: int = 50, carpeta: str = "") -> dict:
+    """Todo lo que el dashboard necesita, en una sola respuesta.
+
+    `carpeta` filtra por casino: con `""` se mezclan todos.
+    """
+    filtro = carpeta or None
+    tiradas = BD.todas_las_tiradas(filtro)
+    historial = BD.resumen_capturas(filtro)
     resumen = E.resumen_desde_tiradas(tiradas)
     resumen["capturas"] = historial["capturas_ok"]
     esquema = E.esquema_tablas("docenas")
@@ -231,8 +263,12 @@ def metricas_completas(limite_capturas: int = 50) -> dict:
         "esquema": esquema,
         "resumen": resumen,
         "capturas": historial,
-        "capturas_disponibles": ANALIZADOR.contar_capturas(),
-        "ultimas_capturas": BD.ultimas_capturas(limite_capturas),
+        "carpeta": carpeta,
+        "capturas_disponibles": ANALIZADOR.contar_capturas(carpeta),
+        "carpetas_disponibles": {
+            c: ANALIZADOR.contar_capturas(c) for c in CARPETAS_CASINO
+        },
+        "ultimas_capturas": BD.ultimas_capturas(limite_capturas, filtro),
         "ajustes_rejilla": BD.listar_ajustes(),
         "alternancia": resumen["alternancia_docenas"],
         "progreso": ANALIZADOR.snapshot(),
